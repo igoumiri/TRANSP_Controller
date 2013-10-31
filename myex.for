@@ -4,10 +4,15 @@ C
       	implicit none
 C
       	real(kind=8), dimension(10,10) :: A0
+      	real(kind=8), dimension(10) :: B
       	real(kind=8), dimension(6,60) :: C
       	real(kind=8), dimension(10) :: K
       	real(kind=8), dimension(10,6) :: L
+      	real(kind=8), dimension(6) :: F
       	real(kind=8), dimension(60) :: gauss
+      	real(kind=8) :: u0
+      	real(kind=8), dimension(6) :: r0
+      	real(kind=8), dimension(6) :: rd
 C
 C
       contains
@@ -16,61 +21,85 @@ C
       		real(kind=8), dimension(60), intent(in) :: omega
       		real(kind=8), dimension(6) :: y
 C
-      		y = matmul(C, omega)
+      		y = matmul(C, omega) - r0
 C
       	end function computeOutput
 C
       	function computeControl(y) result (u)
       		real(kind=8), dimension(6), intent(in) :: y
-      		real(kind=8) :: u
+      		real(kind=8) :: u, Frd
       		real(kind=8), dimension(10), save :: xhat = 0
 C
-      		u = -dot_product(K, xhat)
-      		xhat = xhat + DT0 * (matmul(A0, xhat) + matmul(L, y))
+      		Frd = dot_product(F, rd)
+      		u = Frd - dot_product(K, xhat)
+      		xhat = xhat + DT0 * (matmul(A0, xhat) + matmul(L, y) + B * Frd)
 C
       	end function computeControl
 C
-      	function applyControl(omega, I2) result (torque)
+      	function applyControl(omega, u) result (torque)
       		real(kind=8), dimension(60), intent(in) :: omega
-      		real(kind=8), intent(in) :: I2
+      		real(kind=8), intent(in) :: u
       		real(kind=8), dimension(60) :: torque
-      		
-      		torque = gauss * I2 * omega
+C
+      		torque = gauss * (u + u0) * omega
 C
       	end function applyControl
-      	
+C
       	subroutine loadData()
-      		integer :: i
+      		integer :: status, i
+      		character(len=8) :: name
 C
-      		open(unit=101, file='/u/igoumiri/transp_kaye_method/control_data/A.dat', status='old')
-      		do i=1,10
-      			read(101,*) A(i,:)
+      		open(unit=100, status='old', form='formatted',
+     &			file='/u/igoumiri/transp_kaye_method/parameters.dat')
+      		status = 0
+      		do while (status == 0)
+      			read(100, *, iostat=status) name
+      			select case (name)
+      				case ('#', '!', '//', ';')
+      					continue
+      				case ('A')
+      					do i=1,10
+      						read(100,*) A0(i,:)
+      					end do
+      				case ('B')
+      					do i=1,10
+      						read(100,*) B(i)
+      					end do
+      				case ('C')
+      					do i=1,6
+      						read(100,*) C(i,:)
+      					end do
+      				case ('K')
+      					do i=1,10
+      						read(100,*) K(i)
+      					end do
+      				case ('L')
+      					do i=1,10
+      						read(100,*) L(i,:)
+      					end do
+      				case ('F')
+      					do i=1,6
+      						read(100,*) F(i)
+      					end do
+      				case ('gauss')
+      					do i=1,60
+      						read(100,*) gauss(i)
+      					end do
+      				case ('u0')
+      					read(100,*) u0
+      				case ('r0')
+      					do i=1,6
+      						read(100,*) r0(i)
+      					end do
+      				case ('rd')
+      					do i=1,6
+      						read(100,*) rd(i)
+      					end do
+      				case default
+      					write(0,*) "Imene's controller: error in parameter file"
+      			end select
       		end do
-      		close(101)
-C
-      		open(unit=102, file='/u/igoumiri/transp_kaye_method/control_data/C.dat', status='old')
-      		do i=1,6
-      			read(102,*) C(i,:)
-      		end do
-      		close(102)
-C
-      		open(unit=103, file='/u/igoumiri/transp_kaye_method/control_data/K.dat', status='old')
-      		do i=1,10
-      			read(103,*) K(i,:)
-      		end do
-      		close(103)
-C
-      		open(unit=104, file='/u/igoumiri/transp_kaye_method/control_data/L.dat', status='old')
-      		do i=1,10
-      			read(104,*) L(i,:)
-      		end do
-      		close(104)
-C
-      		open(unit=105, file='/u/igoumiri/transp_kaye_method/control_data/gauss.dat', status='old')
-      		do i=1,60
-      			read(105,*) gauss(i,:)
-      		end do
-      		close(105)
+      		close(100)
 C
       	end subroutine
 C
