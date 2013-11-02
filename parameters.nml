@@ -1,0 +1,9 @@
+&input_files
+   controller = '/u/igoumiri/transp_kaye_method/controller1.dat'
+/
+
+&output_files
+   state = 'state.dat'
+   control = 'control.dat'
+   time = 'time.dat'
+/

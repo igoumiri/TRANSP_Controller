@@ -1,182 +1,370 @@
       module Controller
-      	use trcom
-C
-      	implicit none
-C
-      	real(kind=8), dimension(10,10) :: A0
-      	real(kind=8), dimension(10) :: B
-      	real(kind=8), dimension(6,60) :: C
-      	real(kind=8), dimension(10) :: K
-      	real(kind=8), dimension(10,6) :: L
-      	real(kind=8), dimension(6) :: F
-      	real(kind=8), dimension(60) :: gauss
-      	real(kind=8) :: u0
-      	real(kind=8), dimension(6) :: r0
-      	real(kind=8), dimension(6) :: rd
-C
-C
+      use trcom, only: DT0, NZONES
+
+      implicit none
+
+      save     ! save module variables
+
+      integer, parameter :: r8 = selected_real_kind(12,100)
+      integer, parameter :: kunit = 100 ! probably safe unit number
+      integer, parameter :: max_path_len = 512 ! probably long enough
+      character(len=14) :: parameters = 'parameters.nml'
+      character(len=max_path_len) :: datafile
+      character(len=max_path_len) :: statefile, controlfile, timefile
+      namelist /input_files/ datafile
+      namelist /output_files/ statefile, controlfile, timefile
+
+      ! --- state changes during run ---
+      real(kind=r8), dimension(:), allocatable :: xhat
+
+      ! --- fixed during run ---
+      real(kind=r8), dimension(:,:), allocatable :: A0
+      real(kind=r8), dimension(:,:), allocatable :: B
+      real(kind=r8), dimension(:,:), allocatable :: C
+      real(kind=r8), dimension(:,:), allocatable :: K
+      real(kind=r8), dimension(:,:), allocatable :: L
+      real(kind=r8), dimension(:,:), allocatable :: F
+      real(kind=r8), dimension(:), allocatable :: u0
+      real(kind=r8), dimension(:), allocatable :: r0
+      real(kind=r8), dimension(:), allocatable :: rd
+      real(kind=r8), dimension(:), allocatable :: gauss
+
       contains
-C
-      	function computeOutput(omega) result (y)
-      		real(kind=8), dimension(60), intent(in) :: omega
-      		real(kind=8), dimension(6) :: y
-C
-      		y = matmul(C, omega) - r0
-C
-      	end function computeOutput
-C
-      	function computeControl(y) result (u)
-      		real(kind=8), dimension(6), intent(in) :: y
-      		real(kind=8) :: u, Frd
-      		real(kind=8), dimension(10), save :: xhat = 0
-C
-      		Frd = dot_product(F, rd)
-      		u = Frd - dot_product(K, xhat)
-      		xhat = xhat + DT0 * (matmul(A0, xhat) + matmul(L, y) + B * Frd)
-C
-      	end function computeControl
-C
-      	function applyControl(omega, u) result (torque)
-      		real(kind=8), dimension(60), intent(in) :: omega
-      		real(kind=8), intent(in) :: u
-      		real(kind=8), dimension(60) :: torque
-C
-      		torque = gauss * (u + u0) * omega
-C
-      	end function applyControl
-C
-      	subroutine loadData()
-      		integer :: status, i
-      		character(len=8) :: name
-C
-      		open(unit=100, status='old', form='formatted',
-     &			file='/u/igoumiri/transp_kaye_method/parameters.dat')
-      		status = 0
-      		do while (status == 0)
-      			read(100, *, iostat=status) name
-      			select case (name)
-      				case ('#', '!', '//', ';')
-      					continue
-      				case ('A')
-      					do i=1,10
-      						read(100,*) A0(i,:)
-      					end do
-      				case ('B')
-      					do i=1,10
-      						read(100,*) B(i)
-      					end do
-      				case ('C')
-      					do i=1,6
-      						read(100,*) C(i,:)
-      					end do
-      				case ('K')
-      					do i=1,10
-      						read(100,*) K(i)
-      					end do
-      				case ('L')
-      					do i=1,10
-      						read(100,*) L(i,:)
-      					end do
-      				case ('F')
-      					do i=1,6
-      						read(100,*) F(i)
-      					end do
-      				case ('gauss')
-      					do i=1,60
-      						read(100,*) gauss(i)
-      					end do
-      				case ('u0')
-      					read(100,*) u0
-      				case ('r0')
-      					do i=1,6
-      						read(100,*) r0(i)
-      					end do
-      				case ('rd')
-      					do i=1,6
-      						read(100,*) rd(i)
-      					end do
-      				case default
-      					write(0,*) "Imene's controller: error in parameter file"
-      			end select
-      		end do
-      		close(100)
-C
-      	end subroutine
-C
+
+      ! ----------------------------------------------------------------
+      function computeOutput(omega) result (y)
+      real(kind=r8), dimension(NZONES), intent(in) :: omega
+      real(kind=r8), dimension(size(C, 1)) :: y
+
+      y = matmul(C, omega) - r0
+
+      end function computeOutput
+
+      ! ----------------------------------------------------------------
+      function computeControl(y) result (u)
+      real(kind=r8), dimension(size(C, 1)), intent(in) :: y
+      real(kind=r8), dimension(size(B, 2)) :: u, Frd
+
+      Frd = matmul(F, rd)
+      u = Frd - matmul(K, xhat)
+      xhat = xhat
+     &   + DT0 * (matmul(A0, xhat) + matmul(L, y) + matmul(B, Frd))
+
+      end function computeControl
+
+      ! ----------------------------------------------------------------
+      function applyControl(omega, u) result (torque)
+      real(kind=r8), dimension(NZONES), intent(in) :: omega
+      real(kind=r8), dimension(size(B, 2)), intent(in) :: u
+      real(kind=r8), dimension(NZONES) :: torque
+
+      torque = gauss * (u + u0) * omega
+
+      end function applyControl
+
+      ! ----------------------------------------------------------------
+      subroutine initController(u, y)
+      real(kind=r8), dimension(:), allocatable :: u, y
+
+      ! Read paths from namelists
+      open(unit=kunit, file=parameters, status='old', form='formatted')
+      read(kunit, nml=input_files)
+      rewind(kunit)
+      read(kunit, nml=output_files)
+      close(kunit)
+
+      call loadData
+
+      !A0 = A0 - matmul(B, K) - matmul(L, C)
+
+      allocate(xhat(size(A0, 1)))
+      allocate(u(size(B, 2)))
+      allocate(y(size(C, 1)))
+
+      end subroutine initController
+
+      ! ----------------------------------------------------------------
+      subroutine saveState
+      integer :: i
+
+      open(unit=kunit, file=statefile, status='replace')
+      write(kunit,*) size(xhat)
+      do i=1,size(xhat)
+         write(kunit,*) xhat(i)
+      end do
+      close(kunit)
+
+      end subroutine saveState
+
+      ! ----------------------------------------------------------------
+      subroutine readState
+      integer :: i
+      logical :: iexist
+
+      inquire(file=statefile, exist=iexist)
+
+      if (iexist) then
+         ! %->inform, !->warn, ?->fatal error
+         print *, "%controller.readState: reading state from '"
+     &      // trim(statefile)  // "'"
+         open(unit=kunit, file=statefile, status='old')
+         do i=1,size(xhat)
+            read(kunit,*) xhat(i)
+         end do
+         close(kunit)
+      else
+         print *, '%controller.readState: initializing state'
+         xhat = 0._r8
+      end if
+      end subroutine readState
+
+      ! ----------------------------------------------------------------
+      subroutine loadData
+      integer :: i, rows, cols
+      character(len=5) :: name
+
+      open(unit=kunit, file=datafile, status='old', form='formatted')
+      do
+         read(kunit, *, end=50) name
+
+         select case (name)
+         case ('A')
+            backspace(kunit)
+            read(kunit, *) name, rows, cols
+            allocate(A0(rows, cols))
+            do i=1,rows
+               read(kunit,*) A0(i,:)
+            end do
+         case ('B')
+            backspace(kunit)
+            read(kunit,*) name, rows, cols
+            allocate(B(rows, cols))
+            do i=1,rows
+               read(kunit,*) B(i,:)
+            end do
+         case ('C')
+            backspace(kunit)
+            read(kunit,*) name, rows, cols
+            allocate(C(rows, cols))
+            do i=1,rows
+               read(kunit,*) C(i,:)
+            end do
+         case ('K')
+            backspace(kunit)
+            read(kunit,*) name, rows, cols
+            allocate(K(rows, cols))
+            do i=1,rows
+               read(kunit,*) K(i,:)
+            end do
+         case ('L')
+            backspace(kunit)
+            read(kunit,*) name, rows, cols
+            allocate(L(rows, cols))
+            do i=1,rows
+               read(kunit,*) L(i,:)
+            end do
+         case ('F')
+            backspace(kunit)
+            read(kunit,*) name, rows, cols
+            allocate(F(rows, cols))
+            do i=1,rows
+               read(kunit,*) F(i,:)
+            end do
+         case ('gauss')
+            backspace(kunit)
+            read(kunit,*) name, rows
+            allocate(gauss(rows))
+            do i=1,rows
+               read(kunit,*) gauss(i)
+            end do
+         case ('u0')
+            backspace(kunit)
+            read(kunit,*) name, rows
+            allocate(u0(rows))
+            do i=1,rows
+               read(kunit,*) u0(i)
+            end do
+         case ('r0')
+            backspace(kunit)
+            read(kunit,*) name, rows
+            allocate(r0(rows))
+            do i=1,rows
+               read(kunit,*) r0(i)
+            end do
+         case ('rd')
+            backspace(kunit)
+            read(kunit,*) name, rows
+            allocate(rd(rows))
+            do i=1,rows
+               read(kunit,*) rd(i)
+            end do
+         case default
+            if (scan(name, '#!;') == 0) then ! a comment
+               cycle
+            else
+               write(0,*) "?controller: error in data file '"
+     &            // trim(datafile) // "'"
+               call bad_exit
+            end if
+         end select
+      end do
+ 50   close(kunit)
+
+      call checkConsistency
+
+      end subroutine loadData
+
+      ! ----------------------------------------------------------------
+      subroutine checkConsistency
+
+         ! check that all variables were provided
+         call assert(allocated(A0), 'A must be provided')
+         call assert(allocated(B), 'B must be provided')
+         call assert(allocated(C), 'C must be provided')
+         call assert(allocated(K), 'K must be provided')
+         call assert(allocated(L), 'L must be provided')
+         call assert(allocated(F), 'F must be provided')
+         call assert(allocated(u0), 'u0 must be provided')
+         call assert(allocated(r0), 'r0 must be provided')
+         call assert(allocated(rd), 'rd must be provided')
+         call assert(allocated(gauss), '"gauss" must be provided')
+
+         ! check dimensions
+         call assert(size(A0, 1) == size(A0, 2), 'A must be square')
+         call assert(size(B, 1) == size(A0, 1),
+     &      'B must have as many rows as A')
+         call assert(size(C, 2) == size(A0, 2),
+     &      'C must have as many columns as A')
+         call assert(size(K, 1) == size(B, 2),
+     &      'K must have as many rows as the number of columns of B')
+         call assert(size(K, 2) == size(A0, 2),
+     &      'K must have as many columns as A')
+         call assert(size(L, 1) == size(A0, 1),
+     &      'L must have as many rows as A')
+         call assert(size(L, 2) == size(C, 1),
+     &      'L must have as many columns as the number of rows of C')
+         call assert(size(F, 1) == size(B, 2),
+     &      'L must have as many rows as the number of columns of B')
+         call assert(size(F, 2) == size(C, 1),
+     &      'L must have as many columns as the number of rows of C')
+         call assert(size(u0) == size(B, 2),
+     &   'the length of u0 must be equal to the number of columns of B')
+         call assert(size(r0) == size(C, 1),
+     &      'the length of r0 must be equal to the number of rows of C')
+         call assert(size(rd) == size(C, 1),
+     &      'the length of rd must be equal to the number of rows of C')
+         call assert(size(gauss) == NZONES,
+     &      'the length of "gauss" must be equal NZONES')
+
+      end subroutine checkConsistency
+
+      ! ----------------------------------------------------------------
+      subroutine assert(condition, message)
+      logical, intent(in) :: condition
+      character(len=*), intent(in) :: message
+
+      if (.not.condition) then
+         write(0,*) '?controller: ' // message
+         call bad_exit
+      end if
+
+      end subroutine assert
+
       end module Controller
 C
 C
 C
-C******************** START FILE EXPERT.FOR ; GROUP EXPERT ******************
-C*****************************************************************
+C******************** START FILE EXPERT.FOR ; GROUP EXPERT *************
+C***********************************************************************
 C
 C
-      SUBROUTINE EXPERT(KCLASS,KSUB,KPOINT)
+      subroutine expert(KCLASS,KSUB,KPOINT)
 C
-C	0.04	MODIFY STANDARD OPERATION
+C     0.04	MODIFY STANDARD OPERATION
 C
 C
-      use trcom
+      use trcom, only: NCLASS,NSUB,NPOINT, L3POSTEP, OMEGA, TQANOM
+      use trcom, only: NLREPT, LCENTR, LEDGE, LCM1, LEP1, DVOL, NSTEP
+      use trcom, only: L3AUXVAL, NMODVPH
+
       use Controller
 C
-      real(kind=8), dimension(6) :: y
-      real(kind=8) :: u
-      LOGICAL IEXPER
+      implicit none
+
+      real(kind=r8), dimension(:), allocatable :: u
+      real(kind=r8), dimension(:), allocatable :: y
+
+      integer :: INUM, INCALL, IPCALL, INTES, IPTES
+      integer :: KCLASS, KSUB, KPOINT
+      logical :: IEXPER
+
+      logical :: idone = .false.  ! flag if initialization has been performed
 C
-C-----------------------------------------------------------------
+C-----------------------------------------------------------------------
 C
       IEXPER(INCALL,IPCALL,INTES,IPTES) =
      >     ((INCALL.EQ.INTES).AND.(IPCALL.EQ.IPTES))
 C
 C
-C-----------------------------------------------------------------
+C-----------------------------------------------------------------------
 C
 C
-C	SET TRACER VARIABLES
+C     SET TRACER VARIABLES
 C
       NCLASS=KCLASS
       NSUB=KSUB
       NPOINT=KPOINT
 C
-C	ARE DIAGNOSTICS REQUIRED?
+C     ARE DIAGNOSTICS REQUIRED?
 C
-      IF (NLREPT)CALL REPORT(KCLASS,KSUB,KPOINT)
+      if (NLREPT) call REPORT(KCLASS,KSUB,KPOINT)
 C
 C
-C	DO SPECIAL FUNCTIONS
+C     DO SPECIAL FUNCTIONS
 C
       INUM=1000*KCLASS+KSUB
 C
 C
-C  EXAMPLE:  TEST TO DO SOMETHING ON EXPERT CALL FROM STEPON, POINT 2.
+C     EXAMPLE:  TEST TO DO SOMETHING ON EXPERT CALL FROM STEPON, POINT 2.
 C
-CSAMPLE      IF(IEXPER(INUM,KPOINT,L3STEPON,2)) THEN
-CSAMPLE          ....
-CSAMPLE      ENDIF
+C     SAMPLE      IF(IEXPER(INUM,KPOINT,L3STEPON,2)) THEN
+C     SAMPLE          ....
+C     SAMPLE      ENDIF
 C
-      if (inum == L3AUX .and. kpoint == 6) then
-C
-      	call loadData()
-C
+      if (inum == L3AUXVAL .and. kpoint == 6) then
+         call fdelete(stateFile,inum)   ! delete state file when starting up
+      end if
+
+      if (inum == L3POSTEP .and. kpoint == 11 .and. NSTEP>1) then
+         if (.not. idone) then
+            call initController(u, y)
+            call readState
+            idone = .true.   ! on first call only
+         end if
+
+         if (NMODVPH/=0) then  ! only call when predicting rotation
+
+            y = computeOutput(OMEGA(LCENTR:LEDGE,2))
+
+            u = computeControl(y)
+
+            TQANOM(LCENTR:LEDGE) = DVOL(LCENTR:LEDGE,2)
+     &           *applyControl(OMEGA(LCENTR:LEDGE,2), u) ! TQANOM(I) is the torque applied to a zone
+                                                         ! multiply (Nt*m/cm^3) by zone volume
+            TQANOM(LCM1) = TQANOM(LCENTR)
+            TQANOM(LEP1) = TQANOM(LEDGE)
+         end if
+
+         call saveState         ! saving each time step is not good, todo: need to change this
       end if
 C
-      if (inum == L3POSTEP .and. kpoint == 11) then
 C
-      	y = computeOutput(OMEGA)
 C
-      	u = computeControl(y)
 C
-      	TQANOM = applyControl(OMEGA, u)
-C
-      end if
+      return
 C
 C
 C
 C
-      RETURN
-C
-C
-C
-C
-      END
-C******************** END FILE EXPERT.FOR ; GROUP EXPERT ******************
+      end
+C********************END FILE EXPERT.FOR ; GROUP EXPERT ****************
