@@ -1,5 +1,5 @@
       module Controller
-      use trcom, only: DT0, NZONES
+      use trcom, only: TA, DT0, NZONES
 
       implicit none
 
@@ -63,11 +63,12 @@
       end function applyControl
 
       ! ----------------------------------------------------------------
-      subroutine initController(u, y)
+      subroutine initController(u, y, restart)
       real(kind=r8), dimension(:), allocatable :: u, y
+      logical, intent(in), optional :: restart
 
       ! Read paths from namelists
-      open(unit=kunit, file=parameters, status='old', form='formatted')
+      open(unit=kunit, file=parameters, status='old')
       read(kunit, nml=input_files)
       rewind(kunit)
       read(kunit, nml=output_files)
@@ -75,47 +76,76 @@
 
       call loadData
 
+      ! Right now we load directly A-BK-LC from the datafile but later
+      ! it might be more natural to load A and do the operation here
       !A0 = A0 - matmul(B, K) - matmul(L, C)
 
       allocate(xhat(size(A0, 1)))
       allocate(u(size(B, 2)))
       allocate(y(size(C, 1)))
 
+      ! If restarting, read state
+      ! Otherwise, init xhat and create output files
+      if (present(restart) .and. restart) then
+         ! %->inform, !->warn, ?->fatal error
+         print *, "%controller: "
+     &      // "reading state from '" // trim(statefile)  // "'"
+         call readState
+      else
+         print *, '%controller: initializing state to zero'
+         xhat = 0._r8
+
+         open(unit=kunit, file=statefile, status='replace')
+         write(kunit,*) '! state - size: ', size(xhat)
+         close(kunit)
+
+         open(unit=kunit, file=controlfile, status='replace')
+         write(kunit,*) '! control - size: ', size(u)
+         close(kunit)
+
+         open(unit=kunit, file=timefile, status='replace')
+         write(kunit,*) '! time - size: 1'
+         close(kunit)
+
+         call saveAll(u)
+      end if
+
       end subroutine initController
 
       ! ----------------------------------------------------------------
-      subroutine saveState
+      subroutine saveAll(u)
+      real(kind=r8), dimension(size(B, 2)), intent(in) :: u
       integer :: i
 
-      open(unit=kunit, file=statefile, status='replace')
-      write(kunit,*) size(xhat)
-      do i=1,size(xhat)
-         write(kunit,*) xhat(i)
-      end do
+      ! save time
+      open(unit=kunit, file=timefile,
+     &   status='old', position='append', action='write')
+      write(kunit,*) TA
       close(kunit)
 
-      end subroutine saveState
+      ! save xhat
+      open(unit=kunit, file=statefile,
+     &   status='old', position='append', action='write')
+      write(kunit,*) xhat
+      close(kunit)
+
+      ! save control
+      open(unit=kunit, file=controlfile,
+     &   status='old', position='append', action='write')
+      write(kunit,*) u
+      close(kunit)
+
+      end subroutine saveAll
 
       ! ----------------------------------------------------------------
       subroutine readState
-      integer :: i
-      logical :: iexist
 
-      inquire(file=statefile, exist=iexist)
+      open(unit=kunit, file=statefile,
+     &   status='old', position='append', action='read')
+      backspace(kunit)
+      read(kunit,*) xhat
+      close(kunit)
 
-      if (iexist) then
-         ! %->inform, !->warn, ?->fatal error
-         print *, "%controller.readState: reading state from '"
-     &      // trim(statefile)  // "'"
-         open(unit=kunit, file=statefile, status='old')
-         do i=1,size(xhat)
-            read(kunit,*) xhat(i)
-         end do
-         close(kunit)
-      else
-         print *, '%controller.readState: initializing state'
-         xhat = 0._r8
-      end if
       end subroutine readState
 
       ! ----------------------------------------------------------------
@@ -123,7 +153,7 @@
       integer :: i, rows, cols
       character(len=5) :: name
 
-      open(unit=kunit, file=datafile, status='old', form='formatted')
+      open(unit=kunit, file=datafile, status='old')
       do
          read(kunit, *, end=50) name
 
@@ -202,14 +232,17 @@
             if (scan(name, '#!;') == 0) then ! a comment
                cycle
             else
-               write(0,*) "?controller: error in data file '"
-     &            // trim(datafile) // "'"
+               write(0,*) "?controller: "
+     &            // "error in data file '" // trim(datafile) // "'"
                call bad_exit
             end if
          end select
       end do
  50   close(kunit)
 
+      ! check that:
+      ! - nothing is missing
+      ! - the size of all parameters are consistent
       call checkConsistency
 
       end subroutine loadData
@@ -332,13 +365,19 @@ C     SAMPLE          ....
 C     SAMPLE      ENDIF
 C
       if (inum == L3AUXVAL .and. kpoint == 6) then
-         call fdelete(stateFile,inum)   ! delete state file when starting up
+         ! This part is run once at the very first step
+
+         call initController(u, y)
+
+         idone = .true.   ! on first call only
       end if
 
       if (inum == L3POSTEP .and. kpoint == 11 .and. NSTEP>1) then
          if (.not. idone) then
-            call initController(u, y)
-            call readState
+            ! This part is run once after a restart
+
+            call initController(u, y, restart=.true.)
+
             idone = .true.   ! on first call only
          end if
 
@@ -348,14 +387,16 @@ C
 
             u = computeControl(y)
 
+            ! TQANOM(I) is the torque applied to a zone
+            ! multiply (Nt*m/cm^3) by zone volume
             TQANOM(LCENTR:LEDGE) = DVOL(LCENTR:LEDGE,2)
-     &           *applyControl(OMEGA(LCENTR:LEDGE,2), u) ! TQANOM(I) is the torque applied to a zone
-                                                         ! multiply (Nt*m/cm^3) by zone volume
+     &         * applyControl(OMEGA(LCENTR:LEDGE,2), u)
             TQANOM(LCM1) = TQANOM(LCENTR)
             TQANOM(LEP1) = TQANOM(LEDGE)
          end if
 
-         call saveState         ! saving each time step is not good, todo: need to change this
+         call saveAll(u) ! saving each time step is not good
+                         ! TODO: need to change this
       end if
 C
 C
