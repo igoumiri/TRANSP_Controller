@@ -267,8 +267,8 @@
          call assert(size(A0, 1) == size(A0, 2), 'A must be square')
          call assert(size(B, 1) == size(A0, 1),
      &      'B must have as many rows as A')
-         call assert(size(C, 2) == size(A0, 2),
-     &      'C must have as many columns as A')
+         call assert(size(C, 2) == NZONES,
+     &      'C must have a number of columns equal to NZONES')
          call assert(size(K, 1) == size(B, 2),
      &      'K must have as many rows as the number of columns of B')
          call assert(size(K, 2) == size(A0, 2),
