@@ -230,7 +230,7 @@
                read(kunit,*) rd(i)
             end do
          case default
-            if (scan(name, '#!;') == 0) then ! a comment
+            if (scan(name, '#!;') == 1) then ! a comment
                cycle
             else
                write(0,*) "?controller: "
