@@ -8,7 +8,8 @@
       integer, parameter :: r8 = selected_real_kind(12,100)
       integer, parameter :: kunit = 100 ! probably safe unit number
       integer, parameter :: max_path_len = 512 ! probably long enough
-      character(len=14) :: parameters = 'parameters.nml'
+      character(len=45) :: parameters =
+     &   '/u/igoumiri/transp_kaye_method/parameters.nml'
       character(len=max_path_len) :: datafile
       character(len=max_path_len) :: statefile, controlfile, timefile
       namelist /input_files/ datafile
@@ -318,7 +319,7 @@ C
 C
       use trcom, only: NCLASS,NSUB,NPOINT, L3POSTEP, OMEGA, TQANOM
       use trcom, only: NLREPT, LCENTR, LEDGE, LCM1, LEP1, DVOL, NSTEP
-      use trcom, only: L3AUXVAL, NMODVPH
+      use trcom, only: L3AUXVAL, NMODVPH, NZONES
 
       use Controller
 C
@@ -389,7 +390,7 @@ C
 
             ! TQANOM(I) is the torque applied to a zone
             ! multiply (Nt*m/cm^3) by zone volume
-            TQANOM(LCENTR:LEDGE) = DVOL(LCENTR:LEDGE,2)
+            TQANOM(LCENTR:LEDGE) = NZONES * DVOL(LCENTR:LEDGE,2)
      &         * applyControl(OMEGA(LCENTR:LEDGE,2), u)
             TQANOM(LCM1) = TQANOM(LCENTR)
             TQANOM(LEP1) = TQANOM(LEDGE)
