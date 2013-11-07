@@ -28,7 +28,7 @@
       real(kind=r8), dimension(:), allocatable :: u0
       real(kind=r8), dimension(:), allocatable :: r0
       real(kind=r8), dimension(:), allocatable :: rd
-      real(kind=r8), dimension(:), allocatable :: gauss
+      real(kind=r8), dimension(:,:), allocatable :: gauss
 
       contains
 
@@ -59,13 +59,13 @@
       real(kind=r8), dimension(size(B, 2)), intent(in) :: u
       real(kind=r8), dimension(NZONES) :: torque
 
-      torque = gauss * (u + u0) * omega
+      torque = matmul(gauss, u + u0) * omega
 
       end function applyControl
 
       ! ----------------------------------------------------------------
       subroutine initController(u, y, restart)
-      real(kind=r8), dimension(:), allocatable :: u, y
+      real(kind=r8), dimension(:), allocatable, save :: u, y
       logical, intent(in), optional :: restart
 
       ! Read paths from namelists
@@ -203,10 +203,10 @@
             end do
          case ('gauss')
             backspace(kunit)
-            read(kunit,*) name, rows
-            allocate(gauss(rows))
+            read(kunit,*) name, rows, cols
+            allocate(gauss(rows, cols))
             do i=1,rows
-               read(kunit,*) gauss(i)
+               read(kunit,*) gauss(i,:)
             end do
          case ('u0')
             backspace(kunit)
@@ -268,7 +268,7 @@
          call assert(size(B, 1) == size(A0, 1),
      &      'B must have as many rows as A')
          call assert(size(C, 2) == NZONES,
-     &      'C must have a number of columns equal to NZONES')
+     &      'the number of columns of C must be equal to NZONES')
          call assert(size(K, 1) == size(B, 2),
      &      'K must have as many rows as the number of columns of B')
          call assert(size(K, 2) == size(A0, 2),
@@ -287,8 +287,10 @@
      &      'the length of r0 must be equal to the number of rows of C')
          call assert(size(rd) == size(C, 1),
      &      'the length of rd must be equal to the number of rows of C')
-         call assert(size(gauss) == NZONES,
-     &      'the length of "gauss" must be equal NZONES')
+         call assert(size(gauss, 1) == size(B, 2),
+     &   '"gauss" must have as many rows as the number of columns of B')
+         call assert(size(gauss, 2) == NZONES,
+     &      'the number of columns of "gauss" must be equal to NZONES')
 
       end subroutine checkConsistency
 
