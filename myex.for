@@ -65,7 +65,7 @@
 
       ! ----------------------------------------------------------------
       subroutine initController(u, y, restart)
-      real(kind=r8), dimension(:), allocatable, save :: u, y
+      real(kind=r8), dimension(:), allocatable :: u, y
       logical, intent(in), optional :: restart
 
       ! Read paths from namelists
@@ -327,8 +327,8 @@ C
 C
       implicit none
 
-      real(kind=r8), dimension(:), allocatable :: u
-      real(kind=r8), dimension(:), allocatable :: y
+      real(kind=r8), dimension(:), allocatable, save :: u
+      real(kind=r8), dimension(:), allocatable, save :: y
 
       integer :: INUM, INCALL, IPCALL, INTES, IPTES
       integer :: KCLASS, KSUB, KPOINT
