@@ -287,10 +287,10 @@
      &      'the length of r0 must be equal to the number of rows of C')
          call assert(size(rd) == size(C, 1),
      &      'the length of rd must be equal to the number of rows of C')
-         call assert(size(gauss, 1) == size(B, 2),
-     &   '"gauss" must have as many rows as the number of columns of B')
-         call assert(size(gauss, 2) == NZONES,
-     &      'the number of columns of "gauss" must be equal to NZONES')
+         call assert(size(gauss, 1) == NZONES,
+     &      'the number of rows of "gauss" must be equal to NZONES')
+         call assert(size(gauss, 2) == size(B, 2),
+     &     '"gauss" must have as many columns as B')
 
       end subroutine checkConsistency
 
